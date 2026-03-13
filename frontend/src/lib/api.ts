@@ -1,8 +1,14 @@
 import axios from "axios";
 import { Job, SwipeDirection, SwipeResult, ModelStatus, Stats, ScrapeResult } from "./types";
 
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  (typeof window !== "undefined" && window.location.hostname !== "localhost"
+    ? "https://lincoln-production.up.railway.app"
+    : "http://localhost:8000");
+
 const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000",
+  baseURL: API_URL,
 });
 
 export async function fetchNextJobs(limit: number = 10): Promise<Job[]> {
