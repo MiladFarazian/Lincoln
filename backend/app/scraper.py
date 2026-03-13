@@ -727,6 +727,10 @@ def run_scrape(search_id: int, keywords: str, location: str,
             fp = job_data.get("_fingerprint", "")
             url = job_data.get("_url_normalized") or job_data.get("url")
 
+            # Treat empty string URLs as None to avoid unique constraint issues
+            if not url:
+                url = None
+
             # Skip if already swiped (permanent memory)
             if fp in swiped_fps:
                 skipped_already_swiped += 1
@@ -739,21 +743,26 @@ def run_scrape(search_id: int, keywords: str, location: str,
                 existing_fps.add(fp)
                 continue
 
-            job = Job(
-                title=job_data["title"],
-                company=job_data.get("company"),
-                location=job_data.get("location"),
-                description=job_data.get("description"),
-                url=url,
-                salary=job_data.get("salary") or None,
-                date_posted=job_data.get("date_posted"),
-                fingerprint=fp,
-            )
-            db.add(job)
-            existing_fps.add(fp)
-            if url:
-                existing_urls.add(url)
-            inserted += 1
+            try:
+                job = Job(
+                    title=job_data["title"],
+                    company=job_data.get("company"),
+                    location=job_data.get("location"),
+                    description=job_data.get("description"),
+                    url=url,
+                    salary=job_data.get("salary") or None,
+                    date_posted=job_data.get("date_posted"),
+                    fingerprint=fp,
+                )
+                db.add(job)
+                db.flush()  # Check constraints immediately
+                existing_fps.add(fp)
+                if url:
+                    existing_urls.add(url)
+                inserted += 1
+            except Exception:
+                db.rollback()
+                logger.debug(f"Skipped duplicate job: {job_data.get('title')}")
 
         search = db.query(Search).filter(Search.id == search_id).first()
         if search:
@@ -780,6 +789,10 @@ def run_scrape(search_id: int, keywords: str, location: str,
         logger.info(f"Inserted {inserted} new jobs for search {search_id} ({total_raw} raw from 6 sources)")
     except Exception as e:
         logger.error(f"Scrape failed for search {search_id}: {e}")
-        _update_search_progress(db, search_id, "error", 0, f"Error: {str(e)[:200]}")
+        try:
+            db.rollback()  # Must rollback before using session after a failed commit
+            _update_search_progress(db, search_id, "error", 0, f"Error: {str(e)[:200]}")
+        except Exception:
+            logger.error(f"Failed to update error status for search {search_id}")
     finally:
         db.close()
