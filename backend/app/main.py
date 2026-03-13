@@ -13,8 +13,9 @@ app = FastAPI(title="Lincoln", version="0.1.0")
 
 allowed_origins = [
     "http://localhost:3000",
+    "https://lincoln-lake.vercel.app",
 ]
-# Allow Vercel deployment domain
+# Allow additional Vercel deployment domains
 if os.getenv("FRONTEND_URL"):
     allowed_origins.append(os.getenv("FRONTEND_URL"))
 
