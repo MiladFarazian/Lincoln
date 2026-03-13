@@ -4,6 +4,7 @@ import hashlib
 import re
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 from urllib.parse import quote_plus, urlparse, urlunparse
 
@@ -632,40 +633,39 @@ def run_scrape(search_id: int, keywords: str, location: str,
     try:
         all_jobs = []
 
-        # --- Stage 1: Scrape all sources (0-55%) ---
-        _update_search_progress(db, search_id, "scraping", 5, "Searching RemoteOK...")
-        remoteok = _scrape_remoteok(keywords)
-        all_jobs.extend(remoteok)
-        _update_search_progress(db, search_id, "scraping", 12,
-                                f"RemoteOK: {len(remoteok)} jobs found")
+        # --- Stage 1: Scrape all sources concurrently (0-55%) ---
+        _update_search_progress(db, search_id, "scraping", 5, "Searching 6 job sources...")
 
-        _update_search_progress(db, search_id, "scraping", 14, "Searching LinkedIn...")
-        linkedin = _scrape_linkedin_guest(keywords, location)
-        all_jobs.extend(linkedin)
-        _update_search_progress(db, search_id, "scraping", 22,
-                                f"LinkedIn: {len(linkedin)} jobs found")
+        source_names = ["RemoteOK", "LinkedIn", "Indeed", "The Muse", "Himalayas", "Jobicy"]
+        source_fns = [
+            lambda: _scrape_remoteok(keywords),
+            lambda: _scrape_linkedin_guest(keywords, location),
+            lambda: _scrape_indeed(keywords, location),
+            lambda: _scrape_themuse(keywords, location),
+            lambda: _scrape_himalayas(keywords),
+            lambda: _scrape_jobicy(keywords),
+        ]
 
-        _update_search_progress(db, search_id, "scraping", 24, "Searching Indeed...")
-        indeed = _scrape_indeed(keywords, location)
-        all_jobs.extend(indeed)
-        _update_search_progress(db, search_id, "scraping", 32,
-                                f"Indeed: {len(indeed)} jobs found")
-
-        _update_search_progress(db, search_id, "scraping", 34, "Searching The Muse...")
-        muse = _scrape_themuse(keywords, location)
-        all_jobs.extend(muse)
-        _update_search_progress(db, search_id, "scraping", 40,
-                                f"The Muse: {len(muse)} jobs found")
-
-        _update_search_progress(db, search_id, "scraping", 42, "Searching Himalayas...")
-        himalayas = _scrape_himalayas(keywords)
-        all_jobs.extend(himalayas)
-        _update_search_progress(db, search_id, "scraping", 48,
-                                f"Himalayas: {len(himalayas)} jobs found")
-
-        _update_search_progress(db, search_id, "scraping", 50, "Searching Jobicy...")
-        jobicy = _scrape_jobicy(keywords)
-        all_jobs.extend(jobicy)
+        completed = 0
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            future_to_name = {
+                executor.submit(fn): name
+                for fn, name in zip(source_fns, source_names)
+            }
+            for future in as_completed(future_to_name):
+                name = future_to_name[future]
+                try:
+                    results = future.result()
+                    all_jobs.extend(results)
+                    completed += 1
+                    progress = 5 + int(completed / 6 * 50)
+                    _update_search_progress(
+                        db, search_id, "scraping", progress,
+                        f"{name}: {len(results)} jobs ({completed}/6 sources done)"
+                    )
+                except Exception as e:
+                    completed += 1
+                    logger.error(f"{name} failed: {e}")
 
         total_raw = len(all_jobs)
         _update_search_progress(db, search_id, "scraping", 55,
@@ -710,10 +710,16 @@ def run_scrape(search_id: int, keywords: str, location: str,
         swiped_fps = set(
             row[0] for row in db.query(SwipedFingerprint.fingerprint).all()
         )
-        # Also load fingerprints of jobs already in DB
+        # Load fingerprints of jobs already in DB
         existing_fps = set(
             row[0] for row in db.query(Job.fingerprint).filter(Job.fingerprint.isnot(None)).all()
         )
+        # Pre-load all existing job URLs into a set (avoids per-job DB queries)
+        existing_urls = set(
+            row[0] for row in db.query(Job.url).filter(Job.url.isnot(None)).all()
+        )
+
+        _update_search_progress(db, search_id, "saving", 82, "Saving new jobs...")
 
         inserted = 0
         skipped_already_swiped = 0
@@ -729,11 +735,9 @@ def run_scrape(search_id: int, keywords: str, location: str,
             # Skip if already in DB (by fingerprint or URL)
             if fp in existing_fps:
                 continue
-            if url:
-                existing = db.query(Job).filter(Job.url == url).first()
-                if existing:
-                    existing_fps.add(fp)
-                    continue
+            if url and url in existing_urls:
+                existing_fps.add(fp)
+                continue
 
             job = Job(
                 title=job_data["title"],
@@ -747,6 +751,8 @@ def run_scrape(search_id: int, keywords: str, location: str,
             )
             db.add(job)
             existing_fps.add(fp)
+            if url:
+                existing_urls.add(url)
             inserted += 1
 
         search = db.query(Search).filter(Search.id == search_id).first()
@@ -757,8 +763,6 @@ def run_scrape(search_id: int, keywords: str, location: str,
         skip_msg = f" ({skipped_already_swiped} already swiped)" if skipped_already_swiped else ""
         _update_search_progress(db, search_id, "saving", 90,
                                 f"Saved {inserted} new jobs{skip_msg}")
-
-        _update_search_progress(db, search_id, "saving", 90, f"Saved {inserted} new jobs")
 
         # --- Stage 4: Scoring (90-100%) ---
         try:
