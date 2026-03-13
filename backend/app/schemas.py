@@ -34,6 +34,8 @@ class SwipeOut(BaseModel):
 class ScrapeIn(BaseModel):
     keywords: str
     location: str = ""
+    max_days: Optional[int] = None
+    experience: str = "mid"
 
 
 class ScrapeOut(BaseModel):

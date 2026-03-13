@@ -33,10 +33,17 @@ export async function fetchSavedJobs(page: number = 1): Promise<Job[]> {
   return data;
 }
 
-export async function triggerScrape(keywords: string, location?: string): Promise<ScrapeResult> {
+export async function triggerScrape(
+  keywords: string,
+  location?: string,
+  maxDays?: string,
+  experience?: string,
+): Promise<ScrapeResult> {
   const { data } = await api.post<ScrapeResult>("/api/scrape", {
     keywords,
     location: location || "",
+    max_days: maxDays ? parseInt(maxDays) : null,
+    experience: experience || "mid",
   });
   return data;
 }

@@ -164,11 +164,85 @@ def scrape_jobs(keywords: str, location: str = "") -> list[dict]:
     return unique
 
 
-def run_scrape(search_id: int, keywords: str, location: str):
+def _filter_by_experience(jobs: list[dict], experience: str) -> list[dict]:
+    """Filter jobs by experience level based on title keywords."""
+    if not experience:
+        return jobs
+
+    # Keywords that indicate senior/staff roles
+    senior_keywords = ["senior", "sr.", "sr ", "staff", "principal", "lead", "director", "vp ", "head of", "manager"]
+    entry_keywords = ["intern", "junior", "jr.", "jr ", "entry", "associate", "graduate", "new grad"]
+
+    filtered = []
+    for job in jobs:
+        title_lower = job.get("title", "").lower()
+
+        if experience == "entry":
+            # Exclude senior/staff roles
+            if any(kw in title_lower for kw in senior_keywords):
+                continue
+        elif experience == "mid":
+            # Exclude explicitly senior/staff AND entry-level roles
+            if any(kw in title_lower for kw in senior_keywords + entry_keywords):
+                continue
+        elif experience == "senior":
+            # Exclude entry-level and staff+ roles
+            staff_keywords = ["staff", "principal", "director", "vp ", "head of"]
+            if any(kw in title_lower for kw in entry_keywords + staff_keywords):
+                continue
+        elif experience == "staff":
+            # Exclude entry/mid roles (keep senior and above)
+            if any(kw in title_lower for kw in entry_keywords):
+                continue
+
+        filtered.append(job)
+
+    logger.info(f"Experience filter '{experience}': {len(filtered)}/{len(jobs)} jobs kept")
+    return filtered
+
+
+def _filter_by_date(jobs: list[dict], max_days: Optional[int]) -> list[dict]:
+    """Filter jobs by posting date."""
+    if not max_days:
+        return jobs
+
+    from datetime import datetime, timedelta, timezone
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max_days)
+    filtered = []
+
+    for job in jobs:
+        date_str = job.get("date_posted")
+        if not date_str:
+            # Keep jobs with no date (can't filter them)
+            filtered.append(job)
+            continue
+
+        try:
+            # Try ISO format (RemoteOK uses this)
+            posted = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+            if posted.tzinfo is None:
+                posted = posted.replace(tzinfo=timezone.utc)
+            if posted >= cutoff:
+                filtered.append(job)
+        except (ValueError, TypeError):
+            # Can't parse date, keep the job
+            filtered.append(job)
+
+    logger.info(f"Date filter (last {max_days} days): {len(filtered)}/{len(jobs)} jobs kept")
+    return filtered
+
+
+def run_scrape(search_id: int, keywords: str, location: str,
+               max_days: Optional[int] = None, experience: str = "mid"):
     """Background task entry point."""
     db = SessionLocal()
     try:
         jobs = scrape_jobs(keywords, location)
+
+        # Apply filters
+        jobs = _filter_by_experience(jobs, experience)
+        jobs = _filter_by_date(jobs, max_days)
 
         inserted = 0
         for job_data in jobs:

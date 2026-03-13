@@ -34,7 +34,10 @@ async def scrape_jobs(body: ScrapeIn, background_tasks: BackgroundTasks, db: Ses
     db.add(search)
     db.commit()
     db.refresh(search)
-    background_tasks.add_task(run_scrape, search.id, body.keywords, body.location)
+    background_tasks.add_task(
+        run_scrape, search.id, body.keywords, body.location,
+        body.max_days, body.experience,
+    )
     return ScrapeOut(search_id=search.id, jobs_found=0)
 
 
