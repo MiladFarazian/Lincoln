@@ -1,6 +1,9 @@
+import logging
 import os
 
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Query
+
+logger = logging.getLogger(__name__)
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import func, case, nulls_last
@@ -23,6 +26,43 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup():
     Base.metadata.create_all(bind=engine)
+    _backfill_fingerprints()
+
+
+def _backfill_fingerprints():
+    """Backfill fingerprints for existing jobs and swipe memory for existing swipes."""
+    from .scraper import _job_fingerprint
+    from .database import SessionLocal
+    db = SessionLocal()
+    try:
+        # Backfill job fingerprints
+        jobs_without_fp = db.query(Job).filter(Job.fingerprint.is_(None)).all()
+        for job in jobs_without_fp:
+            job.fingerprint = _job_fingerprint(job.title, job.company)
+
+        # Backfill permanent swipe memory from existing swipes
+        swipes = db.query(Swipe).all()
+        for swipe in swipes:
+            job = db.query(Job).filter(Job.id == swipe.job_id).first()
+            if not job or not job.fingerprint:
+                continue
+            existing = db.query(SwipedFingerprint).filter(
+                SwipedFingerprint.fingerprint == job.fingerprint
+            ).first()
+            if not existing:
+                db.add(SwipedFingerprint(
+                    fingerprint=job.fingerprint,
+                    direction=swipe.direction,
+                    title=job.title,
+                    company=job.company,
+                ))
+
+        db.commit()
+        logger.info(f"Backfilled {len(jobs_without_fp)} job fingerprints, checked {len(swipes)} swipes")
+    except Exception as e:
+        logger.error(f"Backfill failed: {e}")
+    finally:
+        db.close()
 
 
 # --- Scraping ---

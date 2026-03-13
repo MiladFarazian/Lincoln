@@ -14,6 +14,21 @@ interface SwipeCardProps {
 
 const SWIPE_THRESHOLD = 150;
 
+function formatDate(dateStr: string): string {
+  // Handle epoch timestamps
+  const num = Number(dateStr);
+  if (!isNaN(num) && num > 1000000000) {
+    const d = new Date(num * 1000);
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  }
+  // Handle ISO and other date strings
+  const d = new Date(dateStr);
+  if (!isNaN(d.getTime())) {
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  }
+  return dateStr;
+}
+
 export default function SwipeCard({ job, onSwipe, isTop, stackIndex, onExpand }: SwipeCardProps) {
   const x = useMotionValue(0);
   const rotate = useTransform(x, [-300, 0, 300], [-15, 0, 15]);
@@ -106,7 +121,7 @@ export default function SwipeCard({ job, onSwipe, isTop, stackIndex, onExpand }:
           )}
 
           {job.date_posted && (
-            <p className="text-xs text-gray-400 mt-1">Posted: {job.date_posted}</p>
+            <p className="text-xs text-gray-400 mt-1">Posted: {formatDate(job.date_posted)}</p>
           )}
 
           <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700">

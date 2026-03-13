@@ -4,6 +4,19 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, ExternalLink, ThumbsUp, ThumbsDown } from "lucide-react";
 import { Job, SwipeDirection } from "@/lib/types";
 
+function formatDate(dateStr: string): string {
+  const num = Number(dateStr);
+  if (!isNaN(num) && num > 1000000000) {
+    const d = new Date(num * 1000);
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  }
+  const d = new Date(dateStr);
+  if (!isNaN(d.getTime())) {
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  }
+  return dateStr;
+}
+
 interface JobDetailProps {
   job: Job | null;
   onClose: () => void;
@@ -63,7 +76,7 @@ export default function JobDetail({ job, onClose, onSwipe }: JobDetailProps) {
                 </span>
               )}
               {job.date_posted && (
-                <span className="text-xs text-gray-400">Posted: {job.date_posted}</span>
+                <span className="text-xs text-gray-400">Posted: {formatDate(job.date_posted)}</span>
               )}
             </div>
           </div>
