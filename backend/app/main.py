@@ -1,3 +1,5 @@
+import os
+
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -9,9 +11,16 @@ from .schemas import JobOut, SwipeIn, SwipeOut, ScrapeIn, ScrapeOut, ModelStatus
 
 app = FastAPI(title="Lincoln", version="0.1.0")
 
+allowed_origins = [
+    "http://localhost:3000",
+]
+# Allow Vercel deployment domain
+if os.getenv("FRONTEND_URL"):
+    allowed_origins.append(os.getenv("FRONTEND_URL"))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
