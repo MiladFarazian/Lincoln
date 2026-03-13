@@ -7,7 +7,7 @@ from sqlalchemy import func, case, nulls_last
 
 from .database import engine, Base, get_db
 from .models import Job, Swipe, Search, ModelMetadata
-from .schemas import JobOut, SwipeIn, SwipeOut, ScrapeIn, ScrapeOut, ModelStatus, StatsOut
+from .schemas import JobOut, SwipeIn, SwipeOut, ScrapeIn, ScrapeOut, ScrapeStatus, ModelStatus, StatsOut
 
 app = FastAPI(title="Lincoln", version="0.1.0")
 
@@ -39,6 +39,20 @@ async def scrape_jobs(body: ScrapeIn, background_tasks: BackgroundTasks, db: Ses
         body.max_days, body.experience,
     )
     return ScrapeOut(search_id=search.id, jobs_found=0)
+
+
+@app.get("/api/scrape/{search_id}/status", response_model=ScrapeStatus)
+def get_scrape_status(search_id: int, db: Session = Depends(get_db)):
+    search = db.query(Search).filter(Search.id == search_id).first()
+    if not search:
+        raise HTTPException(status_code=404, detail="Search not found")
+    return ScrapeStatus(
+        search_id=search.id,
+        status=search.status or "pending",
+        progress=search.progress or 0,
+        message=search.status_message or "",
+        jobs_found=search.jobs_found or 0,
+    )
 
 
 # --- Jobs ---

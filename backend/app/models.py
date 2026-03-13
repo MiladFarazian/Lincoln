@@ -41,6 +41,9 @@ class Search(Base):
     location = Column(String(256), default="")
     date_run = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     jobs_found = Column(Integer, default=0)
+    status = Column(String(32), default="pending")  # pending, scraping, filtering, scoring, done, error
+    progress = Column(Integer, default=0)  # 0-100
+    status_message = Column(String(256), default="")
 
 
 class ModelMetadata(Base):

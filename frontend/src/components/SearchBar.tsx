@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Search, Loader2, ChevronDown } from "lucide-react";
 import toast from "react-hot-toast";
-import { triggerScrape } from "@/lib/api";
+import { triggerScrape, getScrapeStatus } from "@/lib/api";
 
 interface SearchBarProps {
   onScrapeComplete?: () => void;
@@ -31,22 +31,66 @@ export default function SearchBar({ onScrapeComplete }: SearchBarProps) {
   const [experience, setExperience] = useState("mid");
   const [loading, setLoading] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [statusMessage, setStatusMessage] = useState("");
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => stopPolling();
+  }, [stopPolling]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!keywords.trim()) return;
+    if (!keywords.trim() || loading) return;
 
     setLoading(true);
+    setProgress(0);
+    setStatusMessage("Starting search...");
+
     try {
       const result = await triggerScrape(keywords, location, maxDays, experience);
-      toast.success(`Scrape started! Search ID: ${result.search_id}`, {
-        duration: 3000,
-      });
-      onScrapeComplete?.();
+      const searchId = result.search_id;
+
+      // Poll for progress
+      pollRef.current = setInterval(async () => {
+        try {
+          const status = await getScrapeStatus(searchId);
+          setProgress(status.progress);
+          setStatusMessage(status.message);
+
+          if (status.status === "done" || status.status === "error") {
+            stopPolling();
+            setLoading(false);
+
+            if (status.status === "done") {
+              toast.success(`Found ${status.jobs_found} new jobs!`, { duration: 3000 });
+              onScrapeComplete?.();
+            } else {
+              toast.error("Scrape failed. Try again.");
+            }
+
+            // Keep the completed bar visible briefly, then reset
+            setTimeout(() => {
+              setProgress(0);
+              setStatusMessage("");
+            }, 2000);
+          }
+        } catch {
+          // Polling error — keep trying
+        }
+      }, 800);
     } catch {
       toast.error("Failed to start scrape");
-    } finally {
       setLoading(false);
+      setProgress(0);
+      setStatusMessage("");
     }
   }
 
@@ -80,6 +124,23 @@ export default function SearchBar({ onScrapeComplete }: SearchBarProps) {
           Search
         </button>
       </form>
+
+      {/* Progress bar */}
+      {(loading || progress > 0) && (
+        <div className="space-y-1.5">
+          <div className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-blue-500 rounded-full transition-all duration-500 ease-out"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          {statusMessage && (
+            <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
+              {statusMessage}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Filters toggle */}
       <button

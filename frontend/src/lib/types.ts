@@ -40,3 +40,11 @@ export interface ScrapeResult {
   search_id: number;
   jobs_found: number;
 }
+
+export interface ScrapeStatus {
+  search_id: number;
+  status: string;
+  progress: number;
+  message: string;
+  jobs_found: number;
+}

@@ -1,5 +1,5 @@
 import axios from "axios";
-import { Job, SwipeDirection, SwipeResult, ModelStatus, Stats, ScrapeResult } from "./types";
+import { Job, SwipeDirection, SwipeResult, ModelStatus, Stats, ScrapeResult, ScrapeStatus } from "./types";
 
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL ||
@@ -45,6 +45,11 @@ export async function triggerScrape(
     max_days: maxDays ? parseInt(maxDays) : null,
     experience: experience || "mid",
   });
+  return data;
+}
+
+export async function getScrapeStatus(searchId: number): Promise<ScrapeStatus> {
+  const { data } = await api.get<ScrapeStatus>(`/api/scrape/${searchId}/status`);
   return data;
 }
 

@@ -233,16 +233,54 @@ def _filter_by_date(jobs: list[dict], max_days: Optional[int]) -> list[dict]:
     return filtered
 
 
+def _update_search_progress(db, search_id: int, status: str, progress: int, message: str = ""):
+    """Update the search record with current progress."""
+    search = db.query(Search).filter(Search.id == search_id).first()
+    if search:
+        search.status = status
+        search.progress = progress
+        search.status_message = message
+        db.commit()
+
+
 def run_scrape(search_id: int, keywords: str, location: str,
                max_days: Optional[int] = None, experience: str = "mid"):
     """Background task entry point."""
     db = SessionLocal()
     try:
-        jobs = scrape_jobs(keywords, location)
+        # Stage 1: Scraping (0-50%)
+        _update_search_progress(db, search_id, "scraping", 10, "Fetching jobs from RemoteOK...")
 
-        # Apply filters
+        remoteok_jobs = _scrape_remoteok(keywords)
+        _update_search_progress(db, search_id, "scraping", 30, f"Found {len(remoteok_jobs)} from RemoteOK")
+
+        linkedin_jobs = _scrape_linkedin_guest(keywords, location)
+        _update_search_progress(db, search_id, "scraping", 50,
+                                f"Found {len(remoteok_jobs) + len(linkedin_jobs)} total jobs")
+
+        # Deduplicate
+        all_jobs = remoteok_jobs + linkedin_jobs
+        seen = set()
+        jobs = []
+        for job in all_jobs:
+            url = job.get("url", "")
+            if url and url not in seen:
+                seen.add(url)
+                jobs.append(job)
+            elif not url:
+                jobs.append(job)
+
+        # Stage 2: Filtering (50-70%)
+        _update_search_progress(db, search_id, "filtering", 55, f"Filtering {len(jobs)} jobs...")
+
         jobs = _filter_by_experience(jobs, experience)
+        _update_search_progress(db, search_id, "filtering", 60, f"{len(jobs)} jobs match experience level")
+
         jobs = _filter_by_date(jobs, max_days)
+        _update_search_progress(db, search_id, "filtering", 70, f"{len(jobs)} jobs after all filters")
+
+        # Stage 3: Saving (70-85%)
+        _update_search_progress(db, search_id, "saving", 75, "Saving new jobs to database...")
 
         inserted = 0
         for job_data in jobs:
@@ -267,20 +305,26 @@ def run_scrape(search_id: int, keywords: str, location: str,
         search = db.query(Search).filter(Search.id == search_id).first()
         if search:
             search.jobs_found = inserted
-
         db.commit()
 
-        # Score new jobs if model exists
+        _update_search_progress(db, search_id, "saving", 85, f"Saved {inserted} new jobs")
+
+        # Stage 4: Scoring (85-100%)
         try:
             from .ml import JobRecommender
             recommender = JobRecommender()
             if recommender.model is not None:
+                _update_search_progress(db, search_id, "scoring", 90, "Scoring jobs with ML model...")
                 recommender.predict_scores(db)
         except Exception:
             pass
 
+        _update_search_progress(db, search_id, "done", 100,
+                                f"Done! {inserted} new jobs added")
+
         logger.info(f"Inserted {inserted} new jobs for search {search_id}")
     except Exception as e:
         logger.error(f"Scrape failed for search {search_id}: {e}")
+        _update_search_progress(db, search_id, "error", 0, f"Error: {str(e)[:200]}")
     finally:
         db.close()

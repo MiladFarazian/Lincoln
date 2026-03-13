@@ -43,6 +43,14 @@ class ScrapeOut(BaseModel):
     jobs_found: int
 
 
+class ScrapeStatus(BaseModel):
+    search_id: int
+    status: str
+    progress: int
+    message: str
+    jobs_found: int
+
+
 class ModelStatus(BaseModel):
     trained_at: Optional[datetime] = None
     num_samples: Optional[int] = None
