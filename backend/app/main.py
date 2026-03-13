@@ -11,18 +11,10 @@ from .schemas import JobOut, SwipeIn, SwipeOut, ScrapeIn, ScrapeOut, ModelStatus
 
 app = FastAPI(title="Lincoln", version="0.1.0")
 
-allowed_origins = [
-    "http://localhost:3000",
-    "https://lincoln-lake.vercel.app",
-]
-# Allow additional Vercel deployment domains
-if os.getenv("FRONTEND_URL"):
-    allowed_origins.append(os.getenv("FRONTEND_URL"))
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
