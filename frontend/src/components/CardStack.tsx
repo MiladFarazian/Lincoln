@@ -79,6 +79,10 @@ export default function CardStack() {
   // Keyboard shortcuts
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
+      // Don't intercept keys when typing in an input
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
       if (expandedJob) {
         if (e.key === "Escape") setExpandedJob(null);
         if (e.key === "ArrowLeft" || e.key === "h") handleSwipe("left");
