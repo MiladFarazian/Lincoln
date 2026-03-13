@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+backend/venv/
+backend/models/*.pkl
+backend/lincoln.db
+backend/.env
+
+# Node
+frontend/node_modules/
+frontend/.next/
+frontend/.env.local
+
+# OS
+.DS_Store
+*.swp
