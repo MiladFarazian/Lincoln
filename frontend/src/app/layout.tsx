@@ -17,6 +17,10 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Lincoln — AI Job Portal",
   description: "AI-powered job discovery with smart recommendations",
+  icons: {
+    icon: "/icon-dark.png",
+    apple: "/icon-dark.png",
+  },
 };
 
 export default function RootLayout({

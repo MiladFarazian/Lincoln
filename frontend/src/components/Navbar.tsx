@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { Briefcase, BookmarkCheck, BarChart3 } from "lucide-react";
 
@@ -16,8 +17,24 @@ export default function Navbar() {
   return (
     <nav className="w-full border-b border-gray-100 dark:border-gray-800 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm sticky top-0 z-40">
       <div className="max-w-2xl mx-auto px-4 h-14 flex items-center justify-between">
-        <Link href="/" className="text-xl font-bold text-gray-900 dark:text-white">
-          Lincoln
+        <Link href="/" className="flex items-center gap-2">
+          <Image
+            src="/icon-light.png"
+            alt="Lincoln"
+            width={32}
+            height={32}
+            className="block dark:hidden"
+          />
+          <Image
+            src="/icon-dark.png"
+            alt="Lincoln"
+            width={32}
+            height={32}
+            className="hidden dark:block"
+          />
+          <span className="text-xl font-bold text-gray-900 dark:text-white">
+            Lincoln
+          </span>
         </Link>
         <div className="flex items-center gap-1">
           {links.map(({ href, label, icon: Icon }) => {
