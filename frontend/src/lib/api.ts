@@ -1,5 +1,5 @@
 import axios from "axios";
-import { Job, SwipeDirection, SwipeResult, ModelStatus, Stats, ScrapeResult, ScrapeStatus } from "./types";
+import { Job, SwipeDirection, SwipeResult, ModelStatus, Stats, ScrapeResult, ScrapeStatus, UserResume, CraftedResume } from "./types";
 
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL ||
@@ -66,4 +66,37 @@ export async function retrainModel(): Promise<ModelStatus> {
 export async function getStats(): Promise<Stats> {
   const { data } = await api.get<Stats>("/api/stats");
   return data;
+}
+
+// --- Resume ---
+
+export async function saveResume(content: string): Promise<UserResume> {
+  const { data } = await api.put<UserResume>("/api/resume", { content });
+  return data;
+}
+
+export async function getResume(): Promise<UserResume | null> {
+  try {
+    const { data } = await api.get<UserResume>("/api/resume");
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+export async function craftResume(jobId: number, force: boolean = false): Promise<CraftedResume> {
+  const { data } = await api.post<CraftedResume>("/api/resume/craft", {
+    job_id: jobId,
+    force,
+  });
+  return data;
+}
+
+export async function getCraftedResume(jobId: number): Promise<CraftedResume | null> {
+  try {
+    const { data } = await api.get<CraftedResume>(`/api/resume/craft/${jobId}`);
+    return data;
+  } catch {
+    return null;
+  }
 }

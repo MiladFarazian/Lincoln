@@ -1,7 +1,7 @@
 "use client";
 
 import { motion, AnimatePresence } from "framer-motion";
-import { X, ExternalLink, ThumbsUp, ThumbsDown } from "lucide-react";
+import { X, ExternalLink, ThumbsUp, ThumbsDown, FileText } from "lucide-react";
 import { Job, SwipeDirection } from "@/lib/types";
 
 function formatDate(dateStr: string): string {
@@ -21,9 +21,10 @@ interface JobDetailProps {
   job: Job | null;
   onClose: () => void;
   onSwipe: (direction: SwipeDirection) => void;
+  onCraftResume?: (job: Job) => void;
 }
 
-export default function JobDetail({ job, onClose, onSwipe }: JobDetailProps) {
+export default function JobDetail({ job, onClose, onSwipe, onCraftResume }: JobDetailProps) {
   if (!job) return null;
 
   return (
@@ -97,6 +98,15 @@ export default function JobDetail({ job, onClose, onSwipe }: JobDetailProps) {
               <ThumbsDown className="w-5 h-5" />
               Pass
             </button>
+            {onCraftResume && (
+              <button
+                onClick={() => onCraftResume(job)}
+                className="flex items-center justify-center p-3 rounded-xl bg-purple-50 hover:bg-purple-100 dark:bg-purple-900/30 dark:hover:bg-purple-900/50 text-purple-600 dark:text-purple-400 transition-colors"
+                title="Craft tailored resume"
+              >
+                <FileText className="w-5 h-5" />
+              </button>
+            )}
             {job.url && (
               <a
                 href={job.url}

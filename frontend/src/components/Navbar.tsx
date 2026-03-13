@@ -3,11 +3,12 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { Briefcase, BookmarkCheck, BarChart3 } from "lucide-react";
+import { Briefcase, BookmarkCheck, BarChart3, FileText } from "lucide-react";
 
 const links = [
   { href: "/", label: "Swipe", icon: Briefcase },
   { href: "/saved", label: "Saved", icon: BookmarkCheck },
+  { href: "/resume", label: "Resume", icon: FileText },
   { href: "/stats", label: "Stats", icon: BarChart3 },
 ];
 

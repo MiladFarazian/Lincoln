@@ -36,6 +36,19 @@ export interface Stats {
   swipes_until_retrain: number;
 }
 
+export interface UserResume {
+  id: number;
+  content: string;
+  updated_at: string;
+}
+
+export interface CraftedResume {
+  id: number;
+  job_id: number;
+  crafted_content: string;
+  created_at: string;
+}
+
 export interface ScrapeResult {
   search_id: number;
   jobs_found: number;

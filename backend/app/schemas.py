@@ -59,6 +59,32 @@ class ModelStatus(BaseModel):
     recall_right: Optional[float] = None
 
 
+class ResumeIn(BaseModel):
+    content: str
+
+
+class ResumeOut(BaseModel):
+    id: int
+    content: str
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class CraftResumeIn(BaseModel):
+    job_id: int
+    force: bool = False  # bypass cache and re-craft
+
+
+class CraftedResumeOut(BaseModel):
+    id: int
+    job_id: int
+    crafted_content: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class StatsOut(BaseModel):
     model_config = {"protected_namespaces": ()}
 

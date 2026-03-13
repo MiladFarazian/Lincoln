@@ -6,6 +6,7 @@ import { Loader2, SearchX } from "lucide-react";
 import toast from "react-hot-toast";
 import SwipeCard from "./SwipeCard";
 import JobDetail from "./JobDetail";
+import CraftedResumeModal from "./CraftedResumeModal";
 import { Job, SwipeDirection, SwipeResult } from "@/lib/types";
 import { fetchNextJobs, recordSwipe, undoSwipe } from "@/lib/api";
 
@@ -14,6 +15,7 @@ export default function CardStack() {
   const [loading, setLoading] = useState(true);
   const [expandedJob, setExpandedJob] = useState<Job | null>(null);
   const [lastSwipe, setLastSwipe] = useState<{ job: Job; result: SwipeResult } | null>(null);
+  const [craftingJob, setCraftingJob] = useState<Job | null>(null);
 
   const loadJobs = useCallback(async () => {
     try {
@@ -179,9 +181,15 @@ export default function CardStack() {
             job={expandedJob}
             onClose={() => setExpandedJob(null)}
             onSwipe={handleSwipe}
+            onCraftResume={(job) => {
+              setExpandedJob(null);
+              setCraftingJob(job);
+            }}
           />
         )}
       </AnimatePresence>
+
+      <CraftedResumeModal job={craftingJob} onClose={() => setCraftingJob(null)} />
     </>
   );
 }

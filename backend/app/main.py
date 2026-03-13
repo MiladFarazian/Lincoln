@@ -9,8 +9,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, case, nulls_last
 
 from .database import engine, Base, get_db
-from .models import Job, Swipe, Search, ModelMetadata, SwipedFingerprint
-from .schemas import JobOut, SwipeIn, SwipeOut, ScrapeIn, ScrapeOut, ScrapeStatus, ModelStatus, StatsOut
+from .models import Job, Swipe, Search, ModelMetadata, SwipedFingerprint, UserResume, CraftedResume
+from .schemas import (
+    JobOut, SwipeIn, SwipeOut, ScrapeIn, ScrapeOut, ScrapeStatus,
+    ModelStatus, StatsOut, ResumeIn, ResumeOut, CraftResumeIn, CraftedResumeOut,
+)
 
 app = FastAPI(title="Lincoln", version="0.1.0")
 
@@ -252,6 +255,83 @@ def get_stats(db: Session = Depends(get_db)):
         model_accuracy=model_accuracy,
         swipes_until_retrain=swipes_until_retrain,
     )
+
+
+# --- Resume ---
+
+@app.put("/api/resume", response_model=ResumeOut)
+def save_resume(body: ResumeIn, db: Session = Depends(get_db)):
+    """Save or update the user's base resume."""
+    resume = db.query(UserResume).first()
+    if resume:
+        resume.content = body.content
+        from datetime import datetime, timezone
+        resume.updated_at = datetime.now(timezone.utc)
+    else:
+        resume = UserResume(content=body.content)
+        db.add(resume)
+    db.commit()
+    db.refresh(resume)
+    return resume
+
+
+@app.get("/api/resume", response_model=ResumeOut)
+def get_resume(db: Session = Depends(get_db)):
+    resume = db.query(UserResume).first()
+    if not resume:
+        raise HTTPException(status_code=404, detail="No resume saved yet")
+    return resume
+
+
+@app.post("/api/resume/craft", response_model=CraftedResumeOut)
+def craft_resume_for_job(body: CraftResumeIn, db: Session = Depends(get_db)):
+    """Craft a tailored resume for a specific job posting."""
+    resume = db.query(UserResume).first()
+    if not resume:
+        raise HTTPException(status_code=404, detail="Please save your resume first")
+
+    job = db.query(Job).filter(Job.id == body.job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Check cache unless force re-craft
+    if not body.force:
+        cached = (
+            db.query(CraftedResume)
+            .filter(CraftedResume.job_id == body.job_id)
+            .order_by(CraftedResume.created_at.desc())
+            .first()
+        )
+        if cached:
+            return cached
+
+    from .resume_crafter import craft_resume
+    crafted_text = craft_resume(
+        base_resume=resume.content,
+        job_description=job.description or "",
+        job_title=job.title,
+        company=job.company or "",
+    )
+
+    crafted = CraftedResume(job_id=job.id, crafted_content=crafted_text)
+    db.add(crafted)
+    db.commit()
+    db.refresh(crafted)
+    return crafted
+
+
+@app.get("/api/resume/craft/{job_id}", response_model=CraftedResumeOut)
+def get_crafted_resume(job_id: int, db: Session = Depends(get_db)):
+    """Get a previously crafted resume for a job."""
+    crafted = (
+        db.query(CraftedResume)
+        .filter(CraftedResume.job_id == job_id)
+        .order_by(CraftedResume.created_at.desc())
+        .first()
+    )
+    if not crafted:
+        raise HTTPException(status_code=404, detail="No crafted resume found for this job")
+    return crafted
 
 
 # --- Admin ---

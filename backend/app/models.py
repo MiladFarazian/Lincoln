@@ -59,6 +59,25 @@ class Search(Base):
     status_message = Column(String(256), default="")
 
 
+class UserResume(Base):
+    __tablename__ = "user_resumes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    content = Column(Text, nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class CraftedResume(Base):
+    __tablename__ = "crafted_resumes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=False)
+    crafted_content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    job = relationship("Job")
+
+
 class ModelMetadata(Base):
     __tablename__ = "model_metadata"
 
