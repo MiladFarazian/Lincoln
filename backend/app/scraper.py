@@ -23,16 +23,32 @@ HEADERS = {
 
 
 def _matches_keywords(job: dict, keywords: str) -> bool:
-    """Check if a job matches the search keywords (case-insensitive)."""
-    terms = keywords.lower().split()
-    searchable = " ".join([
-        job.get("title", ""),
-        job.get("company", ""),
-        job.get("description", "") or "",
-        job.get("location", ""),
-        " ".join(job.get("tags", [])),
-    ]).lower()
-    return any(term in searchable for term in terms)
+    """Check if a job matches the search keywords.
+
+    Strategy:
+    - First check if the full phrase appears in the title (best match)
+    - Then check if ALL keywords appear in the title
+    - Then check if ALL keywords appear across title + tags
+    - Single-word searches: match if that word is in the title
+    """
+    kw_lower = keywords.lower().strip()
+    title = job.get("title", "").lower()
+    tags = " ".join(job.get("tags", [])).lower()
+    title_and_tags = f"{title} {tags}"
+
+    # Full phrase match in title — best signal
+    if kw_lower in title:
+        return True
+
+    terms = kw_lower.split()
+
+    # Single keyword: must appear in title or tags
+    if len(terms) == 1:
+        return terms[0] in title_and_tags
+
+    # Multi-keyword: ALL terms must appear in title+tags
+    # (not description — too many false positives)
+    return all(term in title_and_tags for term in terms)
 
 
 def _clean_html(text: str) -> str:
@@ -93,55 +109,82 @@ def _scrape_remoteok(keywords: str) -> list[dict]:
 # --- Source: LinkedIn Guest ---
 
 def _scrape_linkedin_guest(keywords: str, location: str) -> list[dict]:
-    """Scrape LinkedIn's guest job search pages (multiple pages)."""
+    """Scrape LinkedIn's guest job search pages (multiple URL patterns, multiple pages)."""
     all_jobs = []
 
-    for start in [0, 25]:
-        try:
-            url = (
-                f"https://www.linkedin.com/jobs-guest/jobs/api/seeJobs"
-                f"?keywords={quote_plus(keywords)}"
-                f"&location={quote_plus(location or 'United States')}"
-                f"&start={start}"
-            )
+    # Try both the API endpoint and the HTML search page
+    url_patterns = [
+        "https://www.linkedin.com/jobs-guest/jobs/api/seeJobs?keywords={kw}&location={loc}&start={start}",
+        "https://www.linkedin.com/jobs/search?keywords={kw}&location={loc}&start={start}",
+    ]
 
-            resp = requests.get(url, headers={"User-Agent": BROWSER_UA}, timeout=15)
-            if resp.status_code != 200:
-                logger.warning(f"LinkedIn guest page {start} returned {resp.status_code}")
-                continue
+    for pattern in url_patterns:
+        for start in [0, 25, 50]:
+            try:
+                url = pattern.format(
+                    kw=quote_plus(keywords),
+                    loc=quote_plus(location or "United States"),
+                    start=start,
+                )
 
-            soup = BeautifulSoup(resp.text, "html.parser")
+                resp = requests.get(url, headers={
+                    "User-Agent": BROWSER_UA,
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "en-US,en;q=0.9",
+                }, timeout=15)
 
-            for card in soup.find_all("div", class_="base-card"):
-                try:
-                    title_el = card.find("h3")
-                    company_el = card.find("h4")
-                    location_el = card.find("span", class_="job-search-card__location")
-                    link_el = card.find("a", href=True)
-                    time_el = card.find("time")
+                if resp.status_code != 200:
+                    logger.warning(f"LinkedIn {pattern[:50]}... start={start} returned {resp.status_code}")
+                    break  # If first page fails, skip remaining pages for this pattern
 
-                    title = title_el.get_text(strip=True) if title_el else None
-                    if not title:
+                soup = BeautifulSoup(resp.text, "html.parser")
+
+                # Try multiple card selectors (LinkedIn changes these)
+                cards = soup.find_all("div", class_="base-card")
+                if not cards:
+                    cards = soup.find_all("div", class_="base-search-card")
+                if not cards:
+                    cards = soup.find_all("li", class_="jobs-search__result-card")
+
+                page_count = 0
+                for card in cards:
+                    try:
+                        title_el = card.find("h3") or card.find("span", class_="sr-only")
+                        company_el = card.find("h4") or card.find("a", class_="hidden-nested-link")
+                        location_el = card.find("span", class_="job-search-card__location")
+                        link_el = card.find("a", href=True)
+                        time_el = card.find("time")
+
+                        title = title_el.get_text(strip=True) if title_el else None
+                        if not title:
+                            continue
+
+                        job_url = link_el["href"].split("?")[0] if link_el else None
+
+                        all_jobs.append({
+                            "title": title,
+                            "company": company_el.get_text(strip=True) if company_el else None,
+                            "location": location_el.get_text(strip=True) if location_el else None,
+                            "url": job_url,
+                            "date_posted": time_el.get("datetime") if time_el else None,
+                            "salary": None,
+                            "description": None,
+                        })
+                        page_count += 1
+                    except Exception:
                         continue
 
-                    job_url = link_el["href"].split("?")[0] if link_el else None
+                if page_count == 0:
+                    break  # No results, skip remaining pages
 
-                    all_jobs.append({
-                        "title": title,
-                        "company": company_el.get_text(strip=True) if company_el else None,
-                        "location": location_el.get_text(strip=True) if location_el else None,
-                        "url": job_url,
-                        "date_posted": time_el.get("datetime") if time_el else None,
-                        "salary": None,
-                        "description": None,
-                    })
-                except Exception:
-                    continue
+                time.sleep(1.5)
 
-            time.sleep(1)
+            except Exception as e:
+                logger.error(f"LinkedIn guest failed: {e}")
+                break
 
-        except Exception as e:
-            logger.error(f"LinkedIn guest page {start} failed: {e}")
+        if all_jobs:
+            break  # Got results from first pattern, skip second
 
     logger.info(f"LinkedIn guest: {len(all_jobs)} jobs for '{keywords}'")
     return all_jobs
@@ -274,73 +317,76 @@ def _scrape_arbeitnow(keywords: str) -> list[dict]:
 # --- Source: The Muse ---
 
 def _scrape_themuse(keywords: str, location: str) -> list[dict]:
-    """Fetch jobs from The Muse public API (no key needed)."""
+    """Fetch jobs from The Muse public API (no key needed). Fetches multiple pages."""
     jobs = []
     try:
-        params = {
-            "page": 0,
+        base_params = {
             "descending": "true",
         }
 
         # Map keywords to Muse categories
         kw_lower = keywords.lower()
         if any(t in kw_lower for t in ["software", "engineer", "developer", "backend", "frontend", "fullstack", "full-stack"]):
-            params["category"] = "Engineering"
+            base_params["category"] = "Engineering"
         elif "data" in kw_lower:
-            params["category"] = "Data Science"
+            base_params["category"] = "Data Science"
         elif "design" in kw_lower:
-            params["category"] = "Design"
+            base_params["category"] = "Design"
         elif "product" in kw_lower:
-            params["category"] = "Product"
+            base_params["category"] = "Product"
 
         # Map location
         if location:
             loc_lower = location.lower()
             if "los angeles" in loc_lower or "la" == loc_lower:
-                params["location"] = "Los Angeles, CA"
+                base_params["location"] = "Los Angeles, CA"
             elif "san francisco" in loc_lower or "sf" in loc_lower:
-                params["location"] = "San Francisco, CA"
+                base_params["location"] = "San Francisco, CA"
             elif "new york" in loc_lower or "nyc" in loc_lower:
-                params["location"] = "New York, NY"
+                base_params["location"] = "New York, NY"
             elif "seattle" in loc_lower:
-                params["location"] = "Seattle, WA"
+                base_params["location"] = "Seattle, WA"
             else:
-                params["location"] = location
+                base_params["location"] = location
 
-        resp = requests.get(
-            "https://www.themuse.com/api/public/jobs",
-            params=params,
-            headers={"User-Agent": BROWSER_UA},
-            timeout=15,
-        )
+        # Fetch up to 3 pages
+        for page in range(3):
+            params = {**base_params, "page": page}
+            resp = requests.get(
+                "https://www.themuse.com/api/public/jobs",
+                params=params,
+                headers={"User-Agent": BROWSER_UA},
+                timeout=15,
+            )
 
-        if resp.status_code != 200:
-            logger.warning(f"The Muse returned {resp.status_code}")
-            return []
+            if resp.status_code != 200:
+                break
 
-        data = resp.json()
-        results = data.get("results", [])
+            data = resp.json()
+            results = data.get("results", [])
+            if not results:
+                break
 
-        for item in results:
-            locations = item.get("locations", [])
-            loc_str = ", ".join(loc.get("name", "") for loc in locations) if locations else "Unknown"
+            for item in results:
+                locations = item.get("locations", [])
+                loc_str = ", ".join(loc.get("name", "") for loc in locations) if locations else "Unknown"
 
-            desc = item.get("contents", "")
-            job = {
-                "title": item.get("name", ""),
-                "company": item.get("company", {}).get("name", ""),
-                "location": loc_str,
-                "url": f"https://www.themuse.com/jobs/{item.get('id', '')}",
-                "date_posted": item.get("publication_date", ""),
-                "salary": None,
-                "description": _clean_html(desc),
-                "tags": [cat.get("name", "") for cat in item.get("categories", [])],
-            }
+                desc = item.get("contents", "")
+                job = {
+                    "title": item.get("name", ""),
+                    "company": item.get("company", {}).get("name", ""),
+                    "location": loc_str,
+                    "url": f"https://www.themuse.com/jobs/{item.get('id', '')}",
+                    "date_posted": item.get("publication_date", ""),
+                    "salary": None,
+                    "description": _clean_html(desc),
+                    "tags": [cat.get("name", "") for cat in item.get("categories", [])],
+                }
 
-            if _matches_keywords(job, keywords):
-                jobs.append(job)
+                if _matches_keywords(job, keywords):
+                    jobs.append(job)
 
-        logger.info(f"The Muse: {len(jobs)} jobs matching '{keywords}' (from {len(results)} results)")
+        logger.info(f"The Muse: {len(jobs)} jobs matching '{keywords}'")
 
     except Exception as e:
         logger.error(f"The Muse failed: {e}")

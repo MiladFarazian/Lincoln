@@ -178,6 +178,17 @@ def get_stats(db: Session = Depends(get_db)):
     )
 
 
+# --- Admin ---
+
+@app.delete("/api/jobs/all")
+def clear_all_jobs(db: Session = Depends(get_db)):
+    """Clear all jobs and swipes to start fresh."""
+    db.query(Swipe).delete()
+    db.query(Job).delete()
+    db.commit()
+    return {"status": "ok", "message": "All jobs and swipes cleared"}
+
+
 # --- Helpers ---
 
 def _retrain_and_score():
