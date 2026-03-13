@@ -18,8 +18,21 @@ class Job(Base):
     date_scraped = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     score = Column(Float, nullable=True)
     swiped = Column(Boolean, default=False)
+    fingerprint = Column(String(64), index=True)  # hash of normalized title+company for cross-source dedup
 
     swipes = relationship("Swipe", back_populates="job")
+
+
+class SwipedFingerprint(Base):
+    """Permanent memory of swiped jobs — survives job deletions and re-scrapes."""
+    __tablename__ = "swiped_fingerprints"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    fingerprint = Column(String(64), unique=True, nullable=False, index=True)
+    direction = Column(String(8), nullable=False)  # left or right
+    title = Column(String(256))  # for debugging
+    company = Column(String(256))
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class Swipe(Base):

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, case, nulls_last
 
 from .database import engine, Base, get_db
-from .models import Job, Swipe, Search, ModelMetadata
+from .models import Job, Swipe, Search, ModelMetadata, SwipedFingerprint
 from .schemas import JobOut, SwipeIn, SwipeOut, ScrapeIn, ScrapeOut, ScrapeStatus, ModelStatus, StatsOut
 
 app = FastAPI(title="Lincoln", version="0.1.0")
@@ -80,6 +80,37 @@ def record_swipe(body: SwipeIn, background_tasks: BackgroundTasks, db: Session =
     swipe = Swipe(job_id=body.job_id, direction=body.direction)
     db.add(swipe)
     job.swiped = True
+
+    # Save to permanent swipe memory (survives job deletions/re-scrapes)
+    if job.fingerprint:
+        existing_fp = db.query(SwipedFingerprint).filter(
+            SwipedFingerprint.fingerprint == job.fingerprint
+        ).first()
+        if existing_fp:
+            existing_fp.direction = body.direction  # Update if re-swiped
+        else:
+            db.add(SwipedFingerprint(
+                fingerprint=job.fingerprint,
+                direction=body.direction,
+                title=job.title,
+                company=job.company,
+            ))
+    else:
+        # Backfill fingerprint if missing
+        from .scraper import _job_fingerprint
+        fp = _job_fingerprint(job.title, job.company)
+        job.fingerprint = fp
+        existing_fp = db.query(SwipedFingerprint).filter(
+            SwipedFingerprint.fingerprint == fp
+        ).first()
+        if not existing_fp:
+            db.add(SwipedFingerprint(
+                fingerprint=fp,
+                direction=body.direction,
+                title=job.title,
+                company=job.company,
+            ))
+
     db.commit()
     db.refresh(swipe)
 
@@ -102,6 +133,11 @@ def undo_swipe(swipe_id: int, db: Session = Depends(get_db)):
     if job:
         job.swiped = False
         job.score = None
+        # Remove from permanent memory too
+        if job.fingerprint:
+            db.query(SwipedFingerprint).filter(
+                SwipedFingerprint.fingerprint == job.fingerprint
+            ).delete()
     db.delete(swipe)
     db.commit()
     return {"status": "ok"}

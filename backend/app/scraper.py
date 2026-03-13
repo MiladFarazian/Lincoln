@@ -1,16 +1,17 @@
 """Job scraper using multiple free APIs and sources."""
 
+import hashlib
 import re
 import logging
 import time
 from typing import Optional
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse, urlunparse
 
 import requests
 from bs4 import BeautifulSoup
 
 from .database import SessionLocal
-from .models import Job, Search
+from .models import Job, Search, SwipedFingerprint
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,25 @@ HEADERS = {
     "User-Agent": BROWSER_UA,
     "Accept": "application/json",
 }
+
+
+def _job_fingerprint(title: str, company: str) -> str:
+    """Create a stable hash from normalized title + company for dedup across sources."""
+    norm = f"{(title or '').lower().strip()}|{(company or '').lower().strip()}"
+    return hashlib.md5(norm.encode()).hexdigest()
+
+
+def _normalize_url(url: str) -> str:
+    """Normalize URL to reduce duplicates from same job with different query params."""
+    if not url:
+        return ""
+    try:
+        parsed = urlparse(url)
+        # Remove query params and fragments, normalize trailing slashes
+        clean = urlunparse((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", "", ""))
+        return clean.lower()
+    except Exception:
+        return url
 
 
 def _matches_keywords(job: dict, keywords: str) -> bool:
@@ -651,16 +671,25 @@ def run_scrape(search_id: int, keywords: str, location: str,
         _update_search_progress(db, search_id, "scraping", 55,
                                 f"Found {total_raw} jobs across 6 sources")
 
-        # Deduplicate by URL
-        seen = set()
+        # Deduplicate by normalized URL AND by title+company fingerprint
+        seen_urls = set()
+        seen_fps = set()
         jobs = []
         for job in all_jobs:
-            url = job.get("url", "")
-            if url and url not in seen:
-                seen.add(url)
-                jobs.append(job)
-            elif not url:
-                jobs.append(job)
+            url = _normalize_url(job.get("url", ""))
+            fp = _job_fingerprint(job.get("title", ""), job.get("company", ""))
+
+            if url and url in seen_urls:
+                continue
+            if fp in seen_fps:
+                continue
+
+            if url:
+                seen_urls.add(url)
+            seen_fps.add(fp)
+            job["_fingerprint"] = fp
+            job["_url_normalized"] = url
+            jobs.append(job)
 
         _update_search_progress(db, search_id, "filtering", 60,
                                 f"{len(jobs)} unique jobs (removed {total_raw - len(jobs)} duplicates)")
@@ -675,14 +704,35 @@ def run_scrape(search_id: int, keywords: str, location: str,
                                 f"{len(jobs)} jobs after all filters")
 
         # --- Stage 3: Saving (75-90%) ---
-        _update_search_progress(db, search_id, "saving", 78, "Saving new jobs to database...")
+        _update_search_progress(db, search_id, "saving", 78, "Checking against swipe history...")
+
+        # Load all previously swiped fingerprints (permanent memory)
+        swiped_fps = set(
+            row[0] for row in db.query(SwipedFingerprint.fingerprint).all()
+        )
+        # Also load fingerprints of jobs already in DB
+        existing_fps = set(
+            row[0] for row in db.query(Job.fingerprint).filter(Job.fingerprint.isnot(None)).all()
+        )
 
         inserted = 0
+        skipped_already_swiped = 0
         for job_data in jobs:
-            url = job_data.get("url")
+            fp = job_data.get("_fingerprint", "")
+            url = job_data.get("_url_normalized") or job_data.get("url")
+
+            # Skip if already swiped (permanent memory)
+            if fp in swiped_fps:
+                skipped_already_swiped += 1
+                continue
+
+            # Skip if already in DB (by fingerprint or URL)
+            if fp in existing_fps:
+                continue
             if url:
                 existing = db.query(Job).filter(Job.url == url).first()
                 if existing:
+                    existing_fps.add(fp)
                     continue
 
             job = Job(
@@ -693,14 +743,20 @@ def run_scrape(search_id: int, keywords: str, location: str,
                 url=url,
                 salary=job_data.get("salary") or None,
                 date_posted=job_data.get("date_posted"),
+                fingerprint=fp,
             )
             db.add(job)
+            existing_fps.add(fp)
             inserted += 1
 
         search = db.query(Search).filter(Search.id == search_id).first()
         if search:
             search.jobs_found = inserted
         db.commit()
+
+        skip_msg = f" ({skipped_already_swiped} already swiped)" if skipped_already_swiped else ""
+        _update_search_progress(db, search_id, "saving", 90,
+                                f"Saved {inserted} new jobs{skip_msg}")
 
         _update_search_progress(db, search_id, "saving", 90, f"Saved {inserted} new jobs")
 
