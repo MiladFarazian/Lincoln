@@ -528,8 +528,44 @@ def _filter_by_experience(jobs: list[dict], experience: str) -> list[dict]:
     return filtered
 
 
+def _parse_date(date_str: str) -> Optional["datetime"]:
+    """Try to parse a date string in various formats."""
+    from datetime import datetime, timezone
+
+    if not date_str:
+        return None
+
+    # Try epoch timestamp (Himalayas uses these)
+    try:
+        ts = float(date_str)
+        # Sanity check: should be a reasonable unix timestamp (after 2020)
+        if ts > 1577836800:
+            return datetime.fromtimestamp(ts, tz=timezone.utc)
+    except (ValueError, TypeError, OSError):
+        pass
+
+    # Try ISO format (RemoteOK, Jobicy, etc.)
+    try:
+        dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except (ValueError, TypeError):
+        pass
+
+    # Try common date formats
+    for fmt in ["%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%B %d, %Y", "%b %d, %Y", "%m/%d/%Y"]:
+        try:
+            dt = datetime.strptime(date_str.strip(), fmt)
+            return dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+
+    return None
+
+
 def _filter_by_date(jobs: list[dict], max_days: Optional[int]) -> list[dict]:
-    """Filter jobs by posting date."""
+    """Filter jobs by posting date. Drops jobs with no parseable date when filter is active."""
     if not max_days:
         return jobs
 
@@ -537,23 +573,21 @@ def _filter_by_date(jobs: list[dict], max_days: Optional[int]) -> list[dict]:
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=max_days)
     filtered = []
+    dropped_no_date = 0
 
     for job in jobs:
         date_str = job.get("date_posted")
-        if not date_str:
-            filtered.append(job)
+        posted = _parse_date(date_str) if date_str else None
+
+        if posted is None:
+            # No date or unparseable — drop it when a date filter is active
+            dropped_no_date += 1
             continue
 
-        try:
-            posted = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-            if posted.tzinfo is None:
-                posted = posted.replace(tzinfo=timezone.utc)
-            if posted >= cutoff:
-                filtered.append(job)
-        except (ValueError, TypeError):
+        if posted >= cutoff:
             filtered.append(job)
 
-    logger.info(f"Date filter (last {max_days} days): {len(filtered)}/{len(jobs)} jobs kept")
+    logger.info(f"Date filter (last {max_days} days): {len(filtered)}/{len(jobs)} kept, {dropped_no_date} dropped (no date)")
     return filtered
 
 
